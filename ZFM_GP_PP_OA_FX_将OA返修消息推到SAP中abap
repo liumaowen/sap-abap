@@ -1,0 +1,30 @@
+FUNCTION zfm_gp_pp_oa_fx.
+*"----------------------------------------------------------------------
+*"*"本地接口：
+*"  EXPORTING
+*"     VALUE(FLAG) TYPE  ZEMM_FLAG
+*"     VALUE(MESSAGE) TYPE  BAPI_MSG
+*"  TABLES
+*"      IN_BODY STRUCTURE  ZTPP318
+*"----------------------------------------------------------------------
+
+  zfmdatasave1 'ZFM_GP_PP_OA_FX'.
+  zfmdatasave2 'B'.
+  COMMIT WORK.
+  IF in_body[] IS INITIAL.
+    flag = 'N'.
+    message = '输入信息为空'.
+    RETURN.
+  ENDIF.
+
+  MODIFY ztpp318 FROM TABLE in_body.
+  IF sy-subrc = 0.
+    flag = 'Y'.
+    message = '保存成功'.
+  ELSE.
+    flag = 'N'.
+    message = '保存失败'.
+  ENDIF.
+
+  zfmdatasave2 'R'.
+
