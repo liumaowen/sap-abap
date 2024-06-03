@@ -1,0 +1,276 @@
+*&---------------------------------------------------------------------*
+*& Report ZMMR207
+*&---------------------------------------------------------------------*
+*&供应商数据监控分析
+*&---------------------------------------------------------------------*
+REPORT zmmr207 MESSAGE-ID zgp_msg.
+
+TABLES:lfa1,but000,ekko.
+DATA: fldct TYPE slis_t_fieldcat_alv,
+      slayt TYPE slis_layout_alv,
+      varnt LIKE disvariant,
+      repid LIKE sy-repid.
+DATA: i_title TYPE lvc_title.
+DATA:BEGIN OF itab OCCURS 0,
+       lifnr TYPE lfa1-lifnr,        "供应商编码
+       zname TYPE lfa1-name1,        "供应商名称
+       erdat TYPE lfa1-erdat,        "创建日期
+       zsqr  TYPE lfa1-name4,        "申请人
+       zpl   TYPE bp001-unw_remark,  "供应品类
+       zgbrq TYPE but000-chdat,      "关闭日期
+       zts   TYPE i,                 "合作天数
+       sel,
+     END OF itab.
+DATA:wherestr TYPE string,
+     cxroot   TYPE REF TO cx_root.
+
+SELECTION-SCREEN BEGIN OF BLOCK b1 WITH FRAME TITLE t1.
+  SELECT-OPTIONS:s_erdat FOR lfa1-erdat   MODIF ID g1,
+                 s_chdat FOR but000-chdat MODIF ID g2,
+                 s_lifnr FOR ekko-lifnr.
+SELECTION-SCREEN END OF BLOCK b1.
+SELECTION-SCREEN BEGIN OF BLOCK b2 WITH FRAME TITLE t2.
+  PARAMETERS:p1 RADIOBUTTON GROUP grd1 USER-COMMAND singleclick DEFAULT 'X' MODIF ID m1,
+             p2 RADIOBUTTON GROUP grd1 MODIF ID m1,
+             p3 RADIOBUTTON GROUP grd1 MODIF ID m1.
+SELECTION-SCREEN END OF BLOCK b2.
+
+INITIALIZATION.
+  t1 = '选择条件'.
+  t2 = '功能选择'.
+  %_s_erdat_%_app_%-text = '创建日期'.
+  %_s_chdat_%_app_%-text = '关闭日期'.
+  %_s_lifnr_%_app_%-text = '供应商'.
+  %_p1_%_app_%-text = '合格供应商'.
+  %_p2_%_app_%-text = '新增供应商'.
+  %_p3_%_app_%-text = '关闭供应商'.
+
+
+AT SELECTION-SCREEN.
+
+AT SELECTION-SCREEN OUTPUT.
+  LOOP AT SCREEN.
+    CASE 'X'.
+      WHEN p2.
+        CASE screen-group1.
+          WHEN 'G2'.
+            screen-active = 0.
+        ENDCASE.
+      WHEN p3.
+        CASE screen-group1.
+          WHEN 'G1'.
+            screen-active = 0.
+        ENDCASE.
+      WHEN OTHERS.
+        CASE screen-group1.
+          WHEN 'G1' OR 'G2'.
+            screen-active = 0.
+        ENDCASE.
+    ENDCASE.
+    MODIFY SCREEN.
+  ENDLOOP.
+
+START-OF-SELECTION.
+
+  PERFORM savelog(zreplog) USING sy-repid '' IF FOUND.
+  PERFORM getdata.
+  PERFORM updatelog(zreplog) IF FOUND.
+  PERFORM alvshow.
+*&---------------------------------------------------------------------*
+*& Form getdata
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM getdata .
+  CASE 'X'.
+    WHEN p2.
+      IF s_erdat[] IS INITIAL.
+        MESSAGE s001 WITH '创建日期' DISPLAY LIKE 'E'.
+        STOP.
+      ENDIF.
+      wherestr = ` lfa1~erdat IN @s_erdat` &&
+                 ` AND lfa1~lifnr IN @s_lifnr`.
+    WHEN p3.
+      IF s_chdat[] IS INITIAL.
+        MESSAGE s001 WITH '关闭日期' DISPLAY LIKE 'E'.
+        STOP.
+      ENDIF.
+      wherestr = ` lfa1~loevm EQ 'X'` &&
+                 ` AND but000~chdat IN @s_chdat`.
+    WHEN OTHERS.
+      wherestr = ` lfa1~loevm NE 'X'` &&
+                 ` AND lfa1~lifnr IN @s_lifnr`.
+  ENDCASE.
+
+  SELECT
+   lfa1~lifnr,
+   lfa1~name1 AS zname,
+   lfa1~erdat,
+   lfa1~name4 AS zsqr,
+   bp001~unw_remark AS zpl,
+   but000~chdat AS zgbrq
+  FROM lfa1
+  LEFT JOIN but000 ON lfa1~lifnr = but000~partner
+  LEFT JOIN bp001  ON lfa1~lifnr = bp001~partner
+  WHERE (wherestr)
+  INTO CORRESPONDING FIELDS OF TABLE @itab.
+  IF itab[] IS INITIAL.
+    MESSAGE s009 DISPLAY LIKE 'E'.
+    STOP.
+  ENDIF.
+
+  IF p3 EQ 'X'.
+    LOOP AT itab.
+      TRY .
+          CALL FUNCTION 'HR_99S_INTERVAL_BETWEEN_DATES'
+            EXPORTING
+              begda = itab-erdat
+              endda = itab-zgbrq
+            IMPORTING
+              days  = itab-zts.
+          MODIFY itab TRANSPORTING zts.
+        CATCH  cx_root INTO cxroot.
+      ENDTRY.
+    ENDLOOP.
+  ENDIF.
+
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form alvshow
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*& -->  p1        text
+*& <--  p2        text
+*&---------------------------------------------------------------------*
+FORM alvshow .
+  slayt-colwidth_optimize = 'X'. "  colwidth_optimize
+  slayt-zebra             = 'X'.
+  slayt-box_fieldname     = 'SEL'.
+  repid = sy-repid.
+  varnt-report = sy-repid.
+  varnt-handle = 1."控制用户布局
+
+  PERFORM catlg_set TABLES fldct USING:
+    'LIFNR '  '供应商编码'  'LFA1'     'LIFNR',
+    'ZNAME '  '供应商名称'  'LFA1'     'ZNAME',
+    'ERDAT '  '创建日期  '  'LFA1'     'ERDAT',
+    'ZSQR  '  '申请人   '   'LFA1'     'NAME4 ',
+    'ZPL   '  '供应品类 '   'BP001'    'UNW_REMARK  '.
+  IF p3 EQ 'X'.
+    PERFORM catlg_set TABLES fldct USING:
+    'ZGBRQ '  '关闭日期 '   'BUT000'   'CHDAT',
+    'ZTS   '  '合作天数 '    '     '    '  '.
+  ENDIF.
+
+  i_title               = lines( itab ) .
+  CONDENSE i_title.
+  CONCATENATE '条目数:' i_title INTO i_title.
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY'
+    EXPORTING
+      i_callback_program       = repid
+      it_fieldcat              = fldct[]
+      i_save                   = 'A'
+      is_variant               = varnt
+      is_layout                = slayt
+      i_grid_title             = i_title
+      i_callback_user_command  = 'USER_COMMAND'
+      i_callback_pf_status_set = 'SET_STATUS'
+*     IT_EVENTS                = GT_EVENTS
+    TABLES
+      t_outtab                 = itab[]
+    EXCEPTIONS
+      program_error            = 1
+      OTHERS                   = 2.
+ENDFORM.
+*&---------------------------------------------------------------------*
+*& Form catlg_set
+*&---------------------------------------------------------------------*
+*& text
+*&---------------------------------------------------------------------*
+*&      --> FLDCT
+*&      --> P_
+*&      --> P_
+*&      --> P_
+*&      --> P_
+*&---------------------------------------------------------------------*
+FORM catlg_set  TABLES fldcattab
+                USING p_field p_text p_reftab p_reffld .
+  DATA: ls_fldct TYPE slis_fieldcat_alv.
+
+  ls_fldct-fieldname     =  p_field.
+  ls_fldct-seltext_l     =  p_text.
+  ls_fldct-ddictxt       =  'L'.
+  ls_fldct-ref_fieldname =  p_reffld.
+  ls_fldct-ref_tabname   =  p_reftab.
+  IF p_reffld = 'MENGE'.
+    ls_fldct-qfieldname = 'MEINS'.
+    ls_fldct-no_zero = 'X'.
+  ENDIF.
+  IF p_reffld = 'DATS'.
+    ls_fldct-no_zero = 'X'.
+  ENDIF.
+  CASE ls_fldct-fieldname.
+    WHEN 'MENGE'.
+      ls_fldct-qfieldname = 'MEINS'.
+      ls_fldct-no_zero = 'X'.
+    WHEN 'DMBTR' .
+      ls_fldct-cfieldname = 'WAERB'.
+    WHEN 'WRBTR' OR 'DMBTR1' OR 'DMBTR2' .
+      ls_fldct-cfieldname = 'WAERS'.
+      ls_fldct-no_zero = 'X'.
+    WHEN 'KUNNR' OR 'EBELN' OR 'BANFN'.
+      ls_fldct-edit_mask = '==ALPHA'.
+    WHEN 'MATNR' .
+      ls_fldct-edit_mask = '==MATN1'.
+      ls_fldct-intlen = 18.
+    WHEN 'BSTME' OR 'MEINS' .
+      ls_fldct-edit_mask = '==CUNIT'.
+    WHEN 'ICON'.
+      ls_fldct-icon = abap_true.
+    WHEN 'EBELN' OR 'RTYPE' OR 'RTMSG' OR
+         'MBLPO' OR 'FRGKE'.
+      ls_fldct-emphasize = 'C110'.
+    WHEN 'CB'.
+      ls_fldct-checkbox = 'X'.
+      ls_fldct-edit = 'X'.
+    WHEN 'FISC_YEAR' OR 'ZHDRQ' OR 'ZZDRQ'.
+      ls_fldct-no_zero = 'X'.
+    WHEN OTHERS.
+  ENDCASE.
+
+  APPEND ls_fldct TO fldcattab .
+  CLEAR ls_fldct .
+ENDFORM.
+
+FORM set_status USING rt_extab TYPE slis_t_extab.
+  CLEAR rt_extab.
+  REFRESH rt_extab.
+  SET PF-STATUS 'STANDARD' EXCLUDING rt_extab .
+
+ENDFORM.
+
+FORM user_command USING r_ucomm LIKE sy-ucomm
+                  rs_selfield TYPE slis_selfield.
+  DATA: lr_grid TYPE REF TO cl_gui_alv_grid.
+  DATA: lv_rtmsg TYPE bapi_msg.
+  DATA wa LIKE LINE OF itab.
+  CALL FUNCTION 'GET_GLOBALS_FROM_SLVC_FULLSCR'
+    IMPORTING
+      e_grid = lr_grid.
+
+  CALL METHOD lr_grid->check_changed_data.
+
+  CASE r_ucomm.
+    WHEN '&IC1'. "双击
+      CHECK rs_selfield-tabindex <> 0 . "小计行总计行什么的忽略
+      READ TABLE itab INTO wa INDEX rs_selfield-tabindex.
+      CASE rs_selfield-fieldname.
+        WHEN ''.
+
+        WHEN OTHERS.
+    
